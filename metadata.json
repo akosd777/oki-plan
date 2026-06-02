@@ -1,0 +1,6 @@
+{
+  "name": "OKI PLAN",
+  "description": "오키나와 여행을 준비하는 사용자를 위한 올인원 여행 플래너 서비스",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
