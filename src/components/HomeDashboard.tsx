@@ -3,9 +3,9 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import React, { useState } from 'react';
-import { motion } from 'motion/react';
-import { Calendar, Sun, AlertCircle, Plane, Sparkles, Navigation, ListChecks, DollarSign } from 'lucide-react';
+import React, { useState, useRef } from 'react';
+import { motion, AnimatePresence } from 'motion/react';
+import { Calendar, Sun, AlertCircle, Plane, Sparkles, Navigation, ListChecks, DollarSign, Download, Upload, Copy, Check, ExternalLink, RefreshCw } from 'lucide-react';
 import { TravelStyleInfo } from '../types';
 
 interface HomeDashboardProps {
@@ -13,9 +13,14 @@ interface HomeDashboardProps {
   setDepartureDate: (date: string) => void;
   arrivalDate: string;
   setArrivalDate: (date: string) => void;
+  travelStyle: string | null;
+  plannerData: Record<number, string[]>;
+  budgetList: any[];
+  checklist: any[];
+  totalBudget: number;
+  onImportBackup: (data: any) => boolean;
   travelStyleInfo: TravelStyleInfo | null;
   totalScheduleCount: number;
-  totalBudget: number;
   spentBudget: number;
   checklistTotal: number;
   checklistCompleted: number;
@@ -27,15 +32,116 @@ export const HomeDashboard: React.FC<HomeDashboardProps> = ({
   setDepartureDate,
   arrivalDate,
   setArrivalDate,
+  travelStyle,
+  plannerData,
+  budgetList,
+  checklist,
+  totalBudget,
+  onImportBackup,
   travelStyleInfo,
   totalScheduleCount,
-  totalBudget,
   spentBudget,
   checklistTotal,
   checklistCompleted,
   setActiveTab,
 }) => {
   const [showDatePicker, setShowDatePicker] = useState(false);
+  const [showBackupPanel, setShowBackupPanel] = useState(false);
+  const [copiedText, setCopiedText] = useState(false);
+  const [pastedCode, setPastedCode] = useState('');
+  const [importStatus, setImportStatus] = useState<{ type: 'idle' | 'success' | 'error'; message: string }>({ type: 'idle', message: '' });
+  const fileInputRef = useRef<HTMLInputElement>(null);
+
+  const handleExportData = () => {
+    try {
+      const backupData = {
+        departureDate,
+        arrivalDate,
+        travelStyle,
+        plannerData,
+        totalBudget,
+        budgetList,
+        checklist,
+        version: '1.0'
+      };
+      const dataStr = "data:text/json;charset=utf-8," + encodeURIComponent(JSON.stringify(backupData, null, 2));
+      const downloadAnchor = document.createElement('a');
+      downloadAnchor.setAttribute("href", dataStr);
+      downloadAnchor.setAttribute("download", `OKI_PLAN_Backup_${departureDate || 'trip'}.json`);
+      document.body.appendChild(downloadAnchor);
+      downloadAnchor.click();
+      downloadAnchor.remove();
+    } catch (err) {
+      console.error(err);
+    }
+  };
+
+  const handleCopyCode = () => {
+    try {
+      const backupData = {
+        departureDate,
+        arrivalDate,
+        travelStyle,
+        plannerData,
+        totalBudget,
+        budgetList,
+        checklist,
+        version: '1.0'
+      };
+      navigator.clipboard.writeText(JSON.stringify(backupData));
+      setCopiedText(true);
+      setTimeout(() => setCopiedText(false), 2000);
+    } catch (err) {
+      console.error(err);
+    }
+  };
+
+  const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const fileReader = new FileReader();
+    if (e.target.files && e.target.files[0]) {
+      fileReader.readAsText(e.target.files[0], "UTF-8");
+      fileReader.onload = (event) => {
+        try {
+          if (event.target?.result) {
+            const parsed = JSON.parse(event.target.result as string);
+            const success = onImportBackup(parsed);
+            if (success) {
+              setImportStatus({ type: 'success', message: '✓ 여행 복원 완료! 대시보드 및 일정이 성공적으로 동기화되었습니다.' });
+              setTimeout(() => setImportStatus({ type: 'idle', message: '' }), 4000);
+            } else {
+              setImportStatus({ type: 'error', message: '❌ 복원에 실패했습니다. 지원되지 않는 백업 폼입니다.' });
+              setTimeout(() => setImportStatus({ type: 'idle', message: '' }), 4000);
+            }
+          }
+        } catch (error) {
+          setImportStatus({ type: 'error', message: '❌ 올바르지 않은 JSON 백업 파일 형식입니다.' });
+          setTimeout(() => setImportStatus({ type: 'idle', message: '' }), 4000);
+        }
+      };
+    }
+  };
+
+  const handlePasteRestore = () => {
+    if (!pastedCode.trim()) {
+      setImportStatus({ type: 'error', message: '⚠️ 마법의 복원 코드를 먼저 입력해주세요!' });
+      return;
+    }
+    try {
+      const parsed = JSON.parse(pastedCode.trim());
+      const success = onImportBackup(parsed);
+      if (success) {
+        setImportStatus({ type: 'success', message: '✓ 코드로 완벽 복원 성공! 전체 일정이 복구되었습니다.' });
+        setPastedCode('');
+        setTimeout(() => setImportStatus({ type: 'idle', message: '' }), 4000);
+      } else {
+        setImportStatus({ type: 'error', message: '❌ 복원 실패! 올바른 여행 코드를 복사해 넣어보세요.' });
+        setTimeout(() => setImportStatus({ type: 'idle', message: '' }), 4000);
+      }
+    } catch (e) {
+      setImportStatus({ type: 'error', message: '❌ 코드가 손상되었거나 올바르지 않은 JSON 포맷입니다.' });
+      setTimeout(() => setImportStatus({ type: 'idle', message: '' }), 4000);
+    }
+  };
 
   const calculateDDay = (targetDateStr: string) => {
     if (!targetDateStr) return null;
@@ -333,6 +439,123 @@ export const HomeDashboard: React.FC<HomeDashboardProps> = ({
             </div>
           ))}
         </div>
+      </div>
+
+      {/* Dynamic Data Backup & Restore Card */}
+      <div className="bg-white/10 backdrop-blur-xl border border-white/20 p-5 rounded-3xl shadow-2xl flex flex-col gap-3">
+        <div className="flex justify-between items-center select-none">
+          <h3 className="font-bold text-white text-sm flex items-center gap-1.5">
+            <RefreshCw className="text-cyan-300 stroke-[2.5px]" size={14} />
+            내 여행 계획 저장 & 복원 (백업)
+          </h3>
+          <button
+            type="button"
+            onClick={() => setShowBackupPanel(!showBackupPanel)}
+            className="text-[10px] font-bold text-cyan-200 bg-white/10 hover:bg-white/20 border border-white/10 px-2.5 py-1 rounded-lg transition-all cursor-pointer"
+          >
+            {showBackupPanel ? '간단히 보기 ▵' : '백업하기 ▿'}
+          </button>
+        </div>
+
+        <p className="text-[10.5px] leading-relaxed text-cyan-100/70">
+          💡 <strong>미리보기 핵심 팁</strong>: AI Studio의 코딩 미리보기 창은 브라우저 보안 규정상 주소나 빌드 동기화 시 일시적으로 초기화될 수 있습니다. 
+          우측 상단 <strong>&lsquo;Launch Preview/새 창으로 열기&rsquo;</strong> 단추를 눌러 진짜 인터넷 창으로 실행하시면 새로고침을 해도 영구히 자동 보존됩니다!
+        </p>
+
+        <AnimatePresence>
+          {showBackupPanel && (
+            <motion.div
+              initial={{ opacity: 0, height: 0 }}
+              animate={{ opacity: 1, height: 'auto' }}
+              exit={{ opacity: 0, height: 0 }}
+              className="border-t border-white/10 pt-4 flex flex-col gap-4 text-xs overflow-hidden"
+            >
+              {/* Export Panel Block */}
+              <div className="bg-white/5 border border-white/5 p-3 rounded-2xl flex flex-col">
+                <span className="text-[10px] font-extrabold text-cyan-200 uppercase tracking-widest block">📥 현재 나의 여행 조각 백업</span>
+                <p className="text-[10px] text-cyan-100/60 mt-0.5 mb-2.5">
+                  도착날짜 및 일정, 가계부 꿀지출, 기내 준비물 등을 파일이나 여행 코드로 보존합니다.
+                </p>
+                
+                <div className="grid grid-cols-2 gap-2">
+                  <button
+                    type="button"
+                    onClick={handleExportData}
+                    className="bg-cyan-500/80 hover:bg-cyan-600/80 hover:scale-101 active:scale-98 text-white px-3 py-1.5 rounded-xl font-bold flex items-center justify-center gap-1.5 transition cursor-pointer shadow-sm text-[11px]"
+                  >
+                    <Download size={13} />
+                    파일 다운로드
+                  </button>
+                  <button
+                    type="button"
+                    onClick={handleCopyCode}
+                    className="bg-white/15 hover:bg-white/25 active:scale-98 text-white px-3 py-1.5 rounded-xl font-bold flex items-center justify-center gap-1.5 transition cursor-pointer border border-white/10 text-[11px]"
+                  >
+                    {copiedText ? <Check size={13} className="text-emerald-300" /> : <Copy size={13} />}
+                    {copiedText ? '복사 완료!' : '여행 코드 복사'}
+                  </button>
+                </div>
+              </div>
+
+              {/* Import Panel Block */}
+              <div className="bg-white/5 border border-white/5 p-3 rounded-2xl flex flex-col gap-2">
+                <span className="text-[10px] font-extrabold text-cyan-200 uppercase tracking-widest block">📤 보존된 여행 불러오기</span>
+                <p className="text-[10px] text-cyan-100/60 mt-0.5">
+                  저장하신 백업 파일(.json)을 업로드하거나 복사 대입하여 가상의 일정을 완벽 복원하세요.
+                </p>
+                
+                <div className="flex gap-2 items-center">
+                  <input
+                    type="file"
+                    ref={fileInputRef}
+                    onChange={handleFileChange}
+                    accept=".json"
+                    className="hidden"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => fileInputRef.current?.click()}
+                    className="flex-1 bg-teal-500/80 hover:bg-teal-600/80 text-white font-bold py-1.5 rounded-xl flex items-center justify-center gap-1.5 transition cursor-pointer text-[11px]"
+                  >
+                    <Upload size={13} />
+                    백업 파일 올리기
+                  </button>
+                </div>
+
+                {/* Paste Direct Code Restorer */}
+                <div className="flex gap-1.5 mt-1 border-t border-white/5 pt-2">
+                  <input
+                    type="text"
+                    placeholder="복사한 코드를 여기에 붙여넣으세요"
+                    value={pastedCode}
+                    onChange={(e) => setPastedCode(e.target.value)}
+                    className="flex-1 bg-white/10 border border-white/10 rounded-xl px-2.5 py-1 text-white text-[10px] focus:outline-none focus:ring-1 focus:ring-cyan-300 placeholder-white/35 font-mono"
+                  />
+                  <button
+                    type="button"
+                    onClick={handlePasteRestore}
+                    className="bg-cyan-300 hover:bg-cyan-400 active:scale-95 text-cyan-950 font-black px-3 py-1 rounded-xl text-[10.5px] transition cursor-pointer"
+                  >
+                    복원
+                  </button>
+                </div>
+              </div>
+
+              {/* Alerts and Snackbars inside backupper */}
+              {importStatus.message && (
+                <div
+                  className={`p-2.5 rounded-xl border text-[10px] font-bold ${
+                    importStatus.type === 'success'
+                      ? 'bg-emerald-950/40 border-emerald-500/30 text-emerald-300'
+                      : 'bg-rose-950/40 border-rose-500/30 text-rose-300'
+                  }`}
+                >
+                  {importStatus.message}
+                </div>
+              )}
+            </motion.div>
+          )}
+        </AnimatePresence>
       </div>
     </div>
   );

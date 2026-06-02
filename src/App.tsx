@@ -47,29 +47,62 @@ const DEFAULT_BUDGETS: BudgetItem[] = [
   { id: 'b5', title: '국제거리 이자카야 사케랑 오뎅', category: '식비', amount: 54000 },
 ];
 
+// Robust wrapper around localStorage to handle sandboxed iframes graciously
+const safeStorage = {
+  getItem: (key: string): string | null => {
+    try {
+      return localStorage.getItem(key);
+    } catch (e) {
+      console.warn('localStorage is blocked in this environment (e.g. sandboxed iframe):', e);
+      return (window as any).__okiMemoryStorage?.[key] || null;
+    }
+  },
+  setItem: (key: string, value: string): void => {
+    try {
+      localStorage.setItem(key, value);
+    } catch (e) {
+      console.warn('localStorage is blocked in this environment (e.g. sandboxed iframe):', e);
+      if (!(window as any).__okiMemoryStorage) {
+        (window as any).__okiMemoryStorage = {};
+      }
+      (window as any).__okiMemoryStorage[key] = value;
+    }
+  },
+  removeItem: (key: string): void => {
+    try {
+      localStorage.removeItem(key);
+    } catch (e) {
+      console.warn('localStorage is blocked in this environment (e.g. sandboxed iframe):', e);
+      if ((window as any).__okiMemoryStorage) {
+        delete (window as any).__okiMemoryStorage[key];
+      }
+    }
+  }
+};
+
 export default function App() {
   // Load initial states from localStorage or defaults
   const [activeTab, setActiveTab] = useState<string>(() => {
-    return localStorage.getItem('oki_active_tab') || 'home';
+    return safeStorage.getItem('oki_active_tab') || 'home';
   });
 
   const [departureDate, setDepartureDate] = useState<string>(() => {
     // Generate a default departure date of June 20th, 2026 if none exists
-    return localStorage.getItem('oki_departure_date') || '2026-06-20';
+    return safeStorage.getItem('oki_departure_date') || '2026-06-20';
   });
 
   const [arrivalDate, setArrivalDate] = useState<string>(() => {
     // Generate a default arrival date of June 23rd, 2026 if none exists
-    return localStorage.getItem('oki_arrival_date') || '2026-06-23';
+    return safeStorage.getItem('oki_arrival_date') || '2026-06-23';
   });
 
   const [travelStyle, setTravelStyle] = useState<TravelStyle | null>(() => {
-    const saved = localStorage.getItem('oki_travel_style');
+    const saved = safeStorage.getItem('oki_travel_style');
     return saved ? (saved as TravelStyle) : null;
   });
 
   const [plannerData, setPlannerData] = useState<Record<number, string[]>>(() => {
-    const saved = localStorage.getItem('oki_planner_data');
+    const saved = safeStorage.getItem('oki_planner_data');
     if (saved) {
       try {
         return JSON.parse(saved);
@@ -86,12 +119,12 @@ export default function App() {
   });
 
   const [totalBudget, setTotalBudget] = useState<number>(() => {
-    const saved = localStorage.getItem('oki_total_budget');
+    const saved = safeStorage.getItem('oki_total_budget');
     return saved ? parseFloat(saved) : 1800000; // Default 180만원
   });
 
   const [budgetList, setBudgetList] = useState<BudgetItem[]>(() => {
-    const saved = localStorage.getItem('oki_budget_list');
+    const saved = safeStorage.getItem('oki_budget_list');
     if (saved) {
       try {
         return JSON.parse(saved);
@@ -103,7 +136,7 @@ export default function App() {
   });
 
   const [checklist, setChecklist] = useState<ChecklistItem[]>(() => {
-    const saved = localStorage.getItem('oki_checklist');
+    const saved = safeStorage.getItem('oki_checklist');
     if (saved) {
       try {
         return JSON.parse(saved);
@@ -116,39 +149,39 @@ export default function App() {
 
   // Watch states to store in localStorage
   useEffect(() => {
-    localStorage.setItem('oki_active_tab', activeTab);
+    safeStorage.setItem('oki_active_tab', activeTab);
   }, [activeTab]);
 
   useEffect(() => {
-    localStorage.setItem('oki_departure_date', departureDate);
+    safeStorage.setItem('oki_departure_date', departureDate);
   }, [departureDate]);
 
   useEffect(() => {
-    localStorage.setItem('oki_arrival_date', arrivalDate);
+    safeStorage.setItem('oki_arrival_date', arrivalDate);
   }, [arrivalDate]);
 
   useEffect(() => {
     if (travelStyle) {
-      localStorage.setItem('oki_travel_style', travelStyle);
+      safeStorage.setItem('oki_travel_style', travelStyle);
     } else {
-      localStorage.removeItem('oki_travel_style');
+      safeStorage.removeItem('oki_travel_style');
     }
   }, [travelStyle]);
 
   useEffect(() => {
-    localStorage.setItem('oki_planner_data', JSON.stringify(plannerData));
+    safeStorage.setItem('oki_planner_data', JSON.stringify(plannerData));
   }, [plannerData]);
 
   useEffect(() => {
-    localStorage.setItem('oki_total_budget', totalBudget.toString());
+    safeStorage.setItem('oki_total_budget', totalBudget.toString());
   }, [totalBudget]);
 
   useEffect(() => {
-    localStorage.setItem('oki_budget_list', JSON.stringify(budgetList));
+    safeStorage.setItem('oki_budget_list', JSON.stringify(budgetList));
   }, [budgetList]);
 
   useEffect(() => {
-    localStorage.setItem('oki_checklist', JSON.stringify(checklist));
+    safeStorage.setItem('oki_checklist', JSON.stringify(checklist));
   }, [checklist]);
 
   // Operations for Schedule Planner
@@ -268,6 +301,24 @@ export default function App() {
     setBudgetList((prev) => prev.filter((item) => item.id !== id));
   };
 
+  // Add backup import operation to restore all states atomically
+  const handleImportBackup = (data: any): boolean => {
+    if (!data || typeof data !== 'object') return false;
+    try {
+      if (data.departureDate) setDepartureDate(data.departureDate);
+      if (data.arrivalDate) setArrivalDate(data.arrivalDate);
+      if (data.travelStyle !== undefined) setTravelStyle(data.travelStyle);
+      if (data.plannerData) setPlannerData(data.plannerData);
+      if (data.totalBudget !== undefined) setTotalBudget(Number(data.totalBudget));
+      if (data.budgetList) setBudgetList(data.budgetList);
+      if (data.checklist) setChecklist(data.checklist);
+      return true;
+    } catch (error) {
+      console.error('Failed to import backup data:', error);
+      return false;
+    }
+  };
+
   // Derivative metrics
   const totalScheduleCount = Object.keys(plannerData).reduce((count, key) => {
     const day = parseInt(key);
@@ -330,9 +381,15 @@ export default function App() {
                   setDepartureDate={setDepartureDate}
                   arrivalDate={arrivalDate}
                   setArrivalDate={setArrivalDate}
+                  travelStyle={travelStyle}
+                  plannerData={plannerData}
+                  budgetList={budgetList}
+                  checklist={checklist}
+                  totalBudget={totalBudget}
+                  onImportBackup={handleImportBackup}
                   travelStyleInfo={styleInfo}
                   totalScheduleCount={totalScheduleCount}
-                  totalBudget={totalBudget}
+                  totalBudgetSpent={totalBudget} // just referencing prop
                   spentBudget={spentBudget}
                   checklistTotal={checklistTotal}
                   checklistCompleted={checklistCompleted}
